@@ -39,7 +39,7 @@ jobs:
       
       - run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build clang pkg-config libgtk-3-dev
+          sudo apt-get install -y cmake ninja-build clang pkg-config libgtk-3-dev libsecret-1-dev
       
       - run: flutter pub get
       - run: flutter build linux --release
@@ -88,7 +88,7 @@ jobs:
       
       - run: |
           cd build/macos/Build/Products/Release
-          zip -r ../../../../../lab-i-macos.zip lab-i.app
+          zip -r ../../../../../lab-i-macos.zip *.app
       
       - uses: actions/upload-artifact@v4
         with:
