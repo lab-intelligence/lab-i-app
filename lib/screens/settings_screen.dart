@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../models/api_config.dart';
 import '../providers/api_config_provider.dart';
+import '../providers/theme_provider.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -36,7 +37,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _saveConfig() async {
-    if (_apiKeyController.text.trim().isEmpty) return;
+    final isOllama = _selectedProvider == ApiProvider.ollama;
+    if (!isOllama && _apiKeyController.text.trim().isEmpty) return;
 
     setState(() => _saving = true);
 
@@ -103,9 +105,64 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             return _buildEditForm(config);
           }
 
+          final themeModeAsync = ref.watch(themeModeProvider);
+          final themeMode = themeModeAsync.valueOrNull ?? ThemeMode.system;
+
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              const SectionHeader(title: 'Appearance'),
+              const SizedBox(height: 8),
+              Card(
+                elevation: 0,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    children: [
+                      const ListTile(
+                        leading: Icon(Icons.palette_outlined),
+                        title: Text('Theme Mode'),
+                        subtitle: Text('Switch between light and dark themes'),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<ThemeMode>(
+                            segments: const [
+                              ButtonSegment(
+                                value: ThemeMode.system,
+                                label: Text('Auto'),
+                                icon: Icon(Icons.brightness_auto_outlined),
+                              ),
+                              ButtonSegment(
+                                value: ThemeMode.light,
+                                label: Text('Light'),
+                                icon: Icon(Icons.light_mode_outlined),
+                              ),
+                              ButtonSegment(
+                                value: ThemeMode.dark,
+                                label: Text('Dark'),
+                                icon: Icon(Icons.dark_mode_outlined),
+                              ),
+                            ],
+                            selected: {themeMode},
+                            onSelectionChanged: (newSelection) {
+                              ref
+                                  .read(themeModeProvider.notifier)
+                                  .setThemeMode(newSelection.first);
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const SectionHeader(title: 'API Configuration'),
+              const SizedBox(height: 8),
               ListTile(
                 title: const Text('Provider'),
                 subtitle: Text(config.provider.displayName),
@@ -117,15 +174,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   title: const Text('Model'),
                   subtitle: Text(config.model!),
                 ),
-              ListTile(
-                title: const Text('API Key'),
-                subtitle: Text(
-                  '••••••••${config.apiKey.length > 4 ? config.apiKey.substring(config.apiKey.length - 4) : ''}',
+              if (config.provider != ApiProvider.ollama)
+                ListTile(
+                  title: const Text('API Key'),
+                  subtitle: Text(
+                    '••••••••${config.apiKey.length > 4 ? config.apiKey.substring(config.apiKey.length - 4) : ''}',
+                  ),
                 ),
-              ),
               const Divider(),
               ListTile(
-                leading: const Icon(Icons.edit),
+                leading: const Icon(Icons.edit_outlined),
                 title: const Text('Change API Key'),
                 onTap: () => _startEditing(config),
               ),
@@ -168,34 +226,51 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               }
             },
           ),
-          if (_selectedProvider == ApiProvider.openrouter) ...[
+          if (_selectedProvider == ApiProvider.openrouter ||
+              _selectedProvider == ApiProvider.ollama) ...[
             const SizedBox(height: 16),
             TextFormField(
               controller: _customModelController,
-              decoration: const InputDecoration(
-                labelText: 'Model string (Optional)',
-                hintText: 'e.g. openrouter/healer-alpha',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                labelText: _selectedProvider == ApiProvider.ollama
+                    ? 'Ollama Model'
+                    : 'Model string (Optional)',
+                hintText: _selectedProvider == ApiProvider.ollama
+                    ? 'e.g. llava'
+                    : 'e.g. openrouter/healer-alpha',
+                border: const OutlineInputBorder(),
               ),
             ),
           ],
           const SizedBox(height: 16),
-          TextFormField(
-            controller: _apiKeyController,
-            obscureText: _obscureKey,
-            decoration: InputDecoration(
-              labelText: 'API Key',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscureKey ? Icons.visibility : Icons.visibility_off,
+          if (_selectedProvider != ApiProvider.ollama)
+            TextFormField(
+              controller: _apiKeyController,
+              obscureText: _obscureKey,
+              decoration: InputDecoration(
+                labelText: 'API Key',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscureKey ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () {
+                    setState(() => _obscureKey = !_obscureKey);
+                  },
                 ),
-                onPressed: () {
-                  setState(() => _obscureKey = !_obscureKey);
-                },
               ),
             ),
-          ),
+          if (_selectedProvider == ApiProvider.ollama)
+            const Card(
+              color: Colors.blueGrey,
+              child: Padding(
+                padding: EdgeInsets.all(12.0),
+                child: Text(
+                  "Ollama runs locally on your device. No API key needed.\nMake sure Ollama is installed and running before classifying.",
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                ),
+              ),
+            ),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -221,6 +296,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class SectionHeader extends StatelessWidget {
+  final String title;
+  const SectionHeader({super.key, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text(
+        title.toUpperCase(),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Theme.of(context).colorScheme.primary,
+          letterSpacing: 1.1,
+        ),
       ),
     );
   }

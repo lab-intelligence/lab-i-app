@@ -9,6 +9,7 @@ import '../models/api_config.dart';
 import '../models/classification_result.dart';
 import '../utils/constants.dart';
 import 'file_organisation_service.dart';
+import 'providers/ollama_provider.dart';
 
 /// Service that sends images to AI providers for classification.
 class ClassificationService {
@@ -33,22 +34,37 @@ class ClassificationService {
   }) async {
     final filename = p.basename(imageFile.path);
 
+    // Initial connectivity check for Ollama
+    if (apiConfig.provider == ApiProvider.ollama) {
+      final ollama = OllamaProvider(dio: _dio);
+      if (!await ollama.isRunning()) {
+        return ClassificationResult.error(
+          filename: filename,
+          filePath: imageFile.path,
+          errorMessage: 'Ollama is not running. Please start Ollama and try again.',
+        );
+      }
+    }
+
     try {
       var bytes = await imageFile.readAsBytes();
       var mimeType = _getMimeType(imageFile.path);
 
-      // Attempt to resize the image to max 1024x1024 to save bandwidth
+      // Always decode and re-encode as JPEG to ensure payload is lean and compatible.
+      // Large lossless PNGs (like Linux screenshots) can easily exceed API limits.
       final image = img.decodeImage(bytes);
       if (image != null) {
-        if (image.width > 1024 || image.height > 1024) {
-          final resized = img.copyResize(
+        img.Image processed = image;
+        if (image.width > 1280 || image.height > 1280) {
+          processed = img.copyResize(
             image,
-            width: image.width > image.height ? 1024 : null,
-            height: image.height >= image.width ? 1024 : null,
+            width: image.width > image.height ? 1280 : null,
+            height: image.height >= image.width ? 1280 : null,
           );
-          bytes = img.encodeJpg(resized, quality: 85);
-          mimeType = 'image/jpeg'; // Since we encoded it as JPG
         }
+        // Encode to JPEG with quality 80 to keep file size small.
+        bytes = img.encodeJpg(processed, quality: 80);
+        mimeType = 'image/jpeg';
       }
 
       final base64Image = base64Encode(bytes);
@@ -57,35 +73,15 @@ class ClassificationService {
         labels.join(', '),
       );
 
-      final responseText = switch (apiConfig.provider) {
-        ApiProvider.openai => await _callOpenAI(
-          apiConfig.apiKey,
-          base64Image,
-          mimeType,
-          prompt,
-        ),
-        ApiProvider.anthropic => await _callAnthropic(
-          apiConfig.apiKey,
-          base64Image,
-          mimeType,
-          prompt,
-        ),
-        ApiProvider.gemini => await _callGemini(
-          apiConfig.apiKey,
-          base64Image,
-          mimeType,
-          prompt,
-        ),
-        ApiProvider.openrouter => await _callOpenRouter(
-          apiConfig.apiKey,
-          base64Image,
-          mimeType,
-          prompt,
-          apiConfig.model,
-        ),
-      };
+      var responseText = await _callProvider(apiConfig, base64Image, mimeType, prompt);
+      var result = _parseResponse(responseText, filename, imageFile.path, labels);
 
-      final result = _parseResponse(responseText, filename, imageFile.path, labels);
+      // Retry once for Ollama if parsing fails
+      if (result.error != null && apiConfig.provider == ApiProvider.ollama) {
+        final stricterPrompt = '$prompt\n\nIMPORTANT: You must respond ONLY with the format \'label|confidence\'. Do not include any other text, reasoning, or formatting.';
+        responseText = await _callOllama(base64Image, stricterPrompt, apiConfig.model ?? 'llava');
+        result = _parseResponse(responseText, filename, imageFile.path, labels);
+      }
       
       // Feature: Auto-Organize strictly if we have no errors
       if (result.error == null) {
@@ -102,6 +98,47 @@ class ClassificationService {
         errorMessage: _friendlyError(e),
       );
     }
+  }
+
+  /// Helper to call the correct provider based on config.
+  Future<String> _callProvider(
+    ApiConfig apiConfig,
+    String base64Image,
+    String mimeType,
+    String prompt,
+  ) async {
+    return switch (apiConfig.provider) {
+      ApiProvider.openai => await _callOpenAI(
+          apiConfig.apiKey,
+          base64Image,
+          mimeType,
+          prompt,
+        ),
+      ApiProvider.anthropic => await _callAnthropic(
+          apiConfig.apiKey,
+          base64Image,
+          mimeType,
+          prompt,
+        ),
+      ApiProvider.gemini => await _callGemini(
+          apiConfig.apiKey,
+          base64Image,
+          mimeType,
+          prompt,
+        ),
+      ApiProvider.openrouter => await _callOpenRouter(
+          apiConfig.apiKey,
+          base64Image,
+          mimeType,
+          prompt,
+          apiConfig.model,
+        ),
+      ApiProvider.ollama => await _callOllama(
+          base64Image,
+          prompt,
+          apiConfig.model ?? 'llava',
+        ),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -136,11 +173,11 @@ class ClassificationService {
           {
             'role': 'user',
             'content': [
-              {'type': 'text', 'text': prompt},
               {
                 'type': 'image_url',
                 'image_url': {'url': 'data:$mimeType;base64,$base64Image'},
               },
+              {'type': 'text', 'text': prompt},
             ],
           },
         ],
@@ -177,7 +214,6 @@ class ClassificationService {
           {
             'role': 'user',
             'content': [
-              {'type': 'text', 'text': prompt},
               {
                 'type': 'image_url',
                 'image_url': {
@@ -185,6 +221,7 @@ class ClassificationService {
                   'detail': 'low',
                 },
               },
+              {'type': 'text', 'text': prompt},
             ],
           },
         ],
@@ -275,6 +312,22 @@ class ClassificationService {
     final candidates = data['candidates'] as List;
     final parts = candidates[0]['content']['parts'] as List;
     return (parts[0]['text'] as String).trim();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Ollama — POST http://localhost:11434/api/chat
+  // ---------------------------------------------------------------------------
+  Future<String> _callOllama(
+    String base64Image,
+    String prompt,
+    String model,
+  ) async {
+    final ollama = OllamaProvider(dio: _dio);
+    return await ollama.classify(
+      model: model,
+      prompt: prompt,
+      base64Image: base64Image,
+    );
   }
 
   // ---------------------------------------------------------------------------

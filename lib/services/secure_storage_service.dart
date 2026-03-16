@@ -19,13 +19,22 @@ class SecureStorageService {
       key: AppConstants.apiProviderStorageKey,
       value: config.provider.name,
     );
-    if (config.model != null && config.model!.isNotEmpty) {
+    if (config.provider == ApiProvider.ollama) {
       await _storage.write(
-        key: AppConstants.apiModelStorageKey,
-        value: config.model,
+        key: AppConstants.ollamaModelStorageKey,
+        value: config.model ?? 'llava',
       );
-    } else {
       await _storage.delete(key: AppConstants.apiModelStorageKey);
+    } else {
+      if (config.model != null && config.model!.isNotEmpty) {
+        await _storage.write(
+          key: AppConstants.apiModelStorageKey,
+          value: config.model,
+        );
+      } else {
+        await _storage.delete(key: AppConstants.apiModelStorageKey);
+      }
+      await _storage.delete(key: AppConstants.ollamaModelStorageKey);
     }
   }
 
@@ -36,11 +45,20 @@ class SecureStorageService {
         await _storage.read(key: AppConstants.apiProviderStorageKey);
     final modelStr = await _storage.read(key: AppConstants.apiModelStorageKey);
 
-    if (apiKey == null || apiKey.isEmpty) return null;
-
     final provider = providerStr != null
         ? ApiProvider.fromString(providerStr)
         : ApiProvider.openai;
+
+    if (provider == ApiProvider.ollama) {
+      final ollamaModel = await _storage.read(key: AppConstants.ollamaModelStorageKey);
+      return ApiConfig(
+        provider: provider,
+        apiKey: apiKey ?? '',
+        model: ollamaModel ?? 'llava',
+      );
+    }
+
+    if (apiKey == null || apiKey.isEmpty) return null;
 
     return ApiConfig(provider: provider, apiKey: apiKey, model: modelStr);
   }
@@ -50,6 +68,7 @@ class SecureStorageService {
     await _storage.delete(key: AppConstants.apiKeyStorageKey);
     await _storage.delete(key: AppConstants.apiProviderStorageKey);
     await _storage.delete(key: AppConstants.apiModelStorageKey);
+    await _storage.delete(key: AppConstants.ollamaModelStorageKey);
   }
 
   /// Check whether an API key is stored.
@@ -66,5 +85,15 @@ class SecureStorageService {
   /// Read the stored gallery path, or null if not set.
   Future<String?> getGalleryPath() async {
     return await _storage.read(key: AppConstants.lastGalleryPathKey);
+  }
+
+  /// Save the theme mode.
+  Future<void> saveThemeMode(String mode) async {
+    await _storage.write(key: AppConstants.themeModeStorageKey, value: mode);
+  }
+
+  /// Read the stored theme mode.
+  Future<String?> getThemeMode() async {
+    return await _storage.read(key: AppConstants.themeModeStorageKey);
   }
 }

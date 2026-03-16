@@ -78,40 +78,57 @@ class _ApiKeySetupScreenState extends ConsumerState<ApiKeySetupScreen> {
                   }
                 },
               ),
-              if (_selectedProvider == ApiProvider.openrouter) ...[
+              if (_selectedProvider == ApiProvider.openrouter ||
+                  _selectedProvider == ApiProvider.ollama) ...[
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _customModelController,
-                  decoration: const InputDecoration(
-                    labelText: 'Model string (Optional)',
-                    hintText: 'e.g. openrouter/healer-alpha',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: _selectedProvider == ApiProvider.ollama
+                        ? 'Ollama Model'
+                        : 'Model string (Optional)',
+                    hintText: _selectedProvider == ApiProvider.ollama
+                        ? 'e.g. llava'
+                        : 'e.g. openrouter/healer-alpha',
+                    border: const OutlineInputBorder(),
                   ),
                 ),
               ],
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _apiKeyController,
-                obscureText: _obscureKey,
-                decoration: InputDecoration(
-                  labelText: 'API Key',
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureKey ? Icons.visibility : Icons.visibility_off,
+              if (_selectedProvider != ApiProvider.ollama)
+                TextFormField(
+                  controller: _apiKeyController,
+                  obscureText: _obscureKey,
+                  decoration: InputDecoration(
+                    labelText: 'API Key',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureKey ? Icons.visibility : Icons.visibility_off,
+                      ),
+                      onPressed: () {
+                        setState(() => _obscureKey = !_obscureKey);
+                      },
                     ),
-                    onPressed: () {
-                      setState(() => _obscureKey = !_obscureKey);
-                    },
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Please enter your API key';
+                    }
+                    return null;
+                  },
+                ),
+              if (_selectedProvider == ApiProvider.ollama)
+                const Card(
+                  color: Colors.blueGrey,
+                  child: Padding(
+                    padding: EdgeInsets.all(12.0),
+                    child: Text(
+                      "Ollama runs locally on your device. No API key needed.\nMake sure Ollama is installed and running before classifying.",
+                      style: TextStyle(color: Colors.white, fontSize: 13),
+                    ),
                   ),
                 ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Please enter your API key';
-                  }
-                  return null;
-                },
-              ),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _saving ? null : _saveConfig,

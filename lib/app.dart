@@ -9,8 +9,8 @@ import 'screens/label_set_list_screen.dart';
 import 'screens/label_set_editor_screen.dart';
 import 'screens/classification_screen.dart';
 import 'screens/results_screen.dart';
-
 import 'screens/storage_setup_screen.dart';
+import 'providers/theme_provider.dart';
 
 class LabiApp extends ConsumerWidget {
   const LabiApp({super.key});
@@ -18,9 +18,37 @@ class LabiApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
+    final themeModeAsync = ref.watch(themeModeProvider);
+
     return MaterialApp.router(
       title: 'Lab-i',
       debugShowCheckedModeBanner: false,
+      themeMode: themeModeAsync.valueOrNull ?? ThemeMode.system,
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          brightness: Brightness.light,
+        ),
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          brightness: Brightness.dark,
+          surface: const Color(0xFF1A1C1E),
+        ),
+        appBarTheme: const AppBarTheme(
+          centerTitle: true,
+          elevation: 0,
+          backgroundColor: Color(0xFF1A1C1E),
+        ),
+        scaffoldBackgroundColor: const Color(0xFF1A1C1E),
+      ),
       routerConfig: router,
     );
   }

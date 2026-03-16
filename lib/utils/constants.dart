@@ -7,6 +7,8 @@ class AppConstants {
   static const String apiProviderStorageKey = 'labi_api_provider';
   static const String apiModelStorageKey = 'labi_api_model';
   static const String lastGalleryPathKey = 'labi_last_gallery_path';
+  static const String themeModeStorageKey = 'labi_theme_mode';
+  static const String ollamaModelStorageKey = 'ollama_model';
 
   // Hive box names
   static const String labelSetsBox = 'label_sets';

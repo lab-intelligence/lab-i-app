@@ -29,6 +29,9 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
   final Set<File> _selectedFiles = {};
   bool _isSelectionMode = false;
 
+  final Set<String> _selectedAlbumLabels = {};
+  bool _isAlbumSelectionMode = false;
+
   @override
   void initState() {
     super.initState();
@@ -123,6 +126,11 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
           _isSelectionMode = false;
           _selectedFiles.clear();
         }
+
+        // Clean up selected labels
+        _selectedAlbumLabels.removeWhere(
+            (label) => !_sections.any((s) => s.label == label));
+        if (_selectedAlbumLabels.isEmpty) _isAlbumSelectionMode = false;
       });
     } catch (e) {
       if (mounted) {
@@ -146,6 +154,18 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
     });
   }
 
+  void _toggleAlbumSelection(String label) {
+    setState(() {
+      if (_selectedAlbumLabels.contains(label)) {
+        _selectedAlbumLabels.remove(label);
+        if (_selectedAlbumLabels.isEmpty) _isAlbumSelectionMode = false;
+      } else {
+        _selectedAlbumLabels.add(label);
+        _isAlbumSelectionMode = true;
+      }
+    });
+  }
+
   void _bulkShare() async {
     if (_selectedFiles.isEmpty) return;
     await Share.shareXFiles(_selectedFiles.map((f) => XFile(f.path)).toList());
@@ -153,6 +173,116 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
       _isSelectionMode = false;
       _selectedFiles.clear();
     });
+  }
+
+  void _bulkShareAlbums() async {
+    if (_selectedAlbumLabels.isEmpty) return;
+    final List<XFile> xFiles = [];
+    for (final label in _selectedAlbumLabels) {
+      final section =
+          _sections.firstWhere((s) => s.label == label, orElse: () => GallerySection(label: '', files: []));
+      if (section.label.isNotEmpty) {
+        xFiles.addAll(section.files.map((f) => XFile(f.path)));
+      }
+    }
+
+    if (xFiles.isNotEmpty) {
+      await Share.shareXFiles(xFiles);
+    }
+
+    setState(() {
+      _isAlbumSelectionMode = false;
+      _selectedAlbumLabels.clear();
+    });
+  }
+
+  Future<void> _bulkDeleteFiles() async {
+    final confirmed = await _showDeleteConfirmation(
+        'Delete ${_selectedFiles.length} images?');
+    if (confirmed != true) return;
+
+    setState(() => _isLoading = true);
+    try {
+      for (final file in _selectedFiles) {
+        if (file.existsSync()) file.deleteSync();
+        final filename = p.basename(file.path);
+        _metadata.remove(filename);
+      }
+      // Update metadata.json
+      if (_directoryPath != null) {
+        final metaFile = File(p.join(_directoryPath!, 'metadata.json'));
+        await metaFile.writeAsString(jsonEncode(_metadata));
+      }
+      _selectedFiles.clear();
+      _isSelectionMode = false;
+      await _loadGallery();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _bulkDeleteAlbums() async {
+    final confirmed = await _showDeleteConfirmation(
+        'Delete ${_selectedAlbumLabels.length} albums?');
+    if (confirmed != true) return;
+
+    setState(() => _isLoading = true);
+    try {
+      if (_directoryPath != null) {
+        for (final label in _selectedAlbumLabels) {
+          final albumDir = Directory(p.join(_directoryPath!, label));
+          if (albumDir.existsSync()) {
+            // Remove filenames from metadata before deleting folder
+            final files = albumDir.listSync().whereType<File>();
+            for (final file in files) {
+              _metadata.remove(p.basename(file.path));
+            }
+            albumDir.deleteSync(recursive: true);
+          }
+        }
+        // Update metadata.json
+        final metaFile = File(p.join(_directoryPath!, 'metadata.json'));
+        await metaFile.writeAsString(jsonEncode(_metadata));
+      }
+      _selectedAlbumLabels.clear();
+      _isAlbumSelectionMode = false;
+      await _loadGallery();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Delete failed: $e')),
+        );
+      }
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<bool?> _showDeleteConfirmation(String message) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Delete'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -219,8 +349,33 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
   Widget _buildAlbumView() {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Albums'),
+        leading: _isAlbumSelectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () {
+                  setState(() {
+                    _isAlbumSelectionMode = false;
+                    _selectedAlbumLabels.clear();
+                  });
+                },
+              )
+            : null,
+        title: Text(_isAlbumSelectionMode
+            ? '${_selectedAlbumLabels.length} Selected'
+            : 'Albums'),
         centerTitle: true,
+        actions: [
+          if (_isAlbumSelectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.share),
+              onPressed: _bulkShareAlbums,
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _bulkDeleteAlbums,
+            ),
+          ],
+        ],
       ),
       body: GridView.builder(
         padding: const EdgeInsets.all(16),
@@ -230,16 +385,23 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
           mainAxisSpacing: 16,
           childAspectRatio: 0.85,
         ),
-        itemCount: _sections.length,
         itemBuilder: (context, index) {
           final section = _sections[index];
           final latestFile = section.files.last;
+          final isSelected = _selectedAlbumLabels.contains(section.label);
 
           return GestureDetector(
             onTap: () {
-              setState(() {
-                _selectedAlbumLabel = section.label;
-              });
+              if (_isAlbumSelectionMode) {
+                _toggleAlbumSelection(section.label);
+              } else {
+                setState(() {
+                  _selectedAlbumLabel = section.label;
+                });
+              }
+            },
+            onLongPress: () {
+              _toggleAlbumSelection(section.label);
             },
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -257,36 +419,54 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
                         ),
                         Container(
                           decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.5),
-                              ],
-                            ),
+                            color: isSelected ? Colors.black45 : Colors.transparent,
+                            gradient: isSelected
+                                ? null
+                                : LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.transparent,
+                                      Colors.black.withValues(alpha: 0.5),
+                                    ],
+                                  ),
                           ),
                         ),
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(4),
+                        if (_isAlbumSelectionMode)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Icon(
+                              isSelected
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              color: isSelected
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Colors.white,
+                              size: 24,
                             ),
-                            child: Text(
-                              '${section.files.length}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                          ),
+                        if (!_isAlbumSelectionMode)
+                          Positioned(
+                            bottom: 8,
+                            right: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '${section.files.length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -329,11 +509,16 @@ class _GalleryScreenState extends ConsumerState<GalleryScreen>
             ? '${_selectedFiles.length} Selected'
             : section.label),
         actions: [
-          if (_isSelectionMode)
+          if (_isSelectionMode) ...[
             IconButton(
               icon: const Icon(Icons.share),
               onPressed: _bulkShare,
             ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _bulkDeleteFiles,
+            ),
+          ],
         ],
       ),
       body: GridView.builder(

@@ -3,7 +3,8 @@ enum ApiProvider {
   openai('OpenAI'),
   anthropic('Anthropic'),
   gemini('Google Gemini'),
-  openrouter('OpenRouter');
+  openrouter('OpenRouter'),
+  ollama('Ollama (Local)');
 
   const ApiProvider(this.displayName);
   final String displayName;
@@ -28,7 +29,7 @@ class ApiConfig {
     this.model,
   });
 
-  bool get isValid => apiKey.isNotEmpty;
+  bool get isValid => provider == ApiProvider.ollama || apiKey.isNotEmpty;
 
   ApiConfig copyWith({
     ApiProvider? provider,
